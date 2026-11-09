@@ -1,10 +1,11 @@
 {
   "client": {
-    "name": "[Nombre del cliente]",
+    "name": "Oz Coffee",
     "logo": ""
   },
   "currency": "CLP",
   "locale": "es-CL",
+  "timezone": "America/Santiago",
   "meta": {
     "adAccountId": "",
     "purchaseActionType": "omni_purchase",
@@ -27,6 +28,27 @@
       "businessObjective": "Aumentar las ventas online un 20% frente a octubre 2025",
       "funnelStage": "conv",
       "summary": "Superamos la meta de compras y el ROAS subió gracias al video UGC, que concentró casi un tercio de las ventas. Para noviembre: renovar creatividades (la frecuencia se acerca a 4) y preparar Cyber Monday."
+    }
+  },
+  "social": {
+    "default": {
+      "summary": "",
+      "conclusions": [],
+      "recos": [],
+      "mix": [["Reels", 45], ["Carruseles", 35], ["Imagen", 20]]
+    },
+    "2026-10": {
+      "summary": "Lectura del mes en Instagram: qué funcionó, qué no y por qué.",
+      "demoInsight": "Hallazgo sobre la comunidad (edad, países).",
+      "commentTopics": [["Consultas de producto", 40], ["Elogios", 30], ["Horarios y locales", 20, "hl"], ["Reclamos", 10, "neg"]],
+      "conclusions": [
+        ["Aprendizaje 1", "Dato que lo respalda."],
+        ["Aprendizaje 2", "Dato que lo respalda."]
+      ],
+      "recos": [
+        ["Reels", "2 por semana", "Nombre de la idea", "Descripción breve.", "Alcance"],
+        ["Carrusel", "1 por semana", "Nombre de la idea", "Descripción breve.", "Guardados"]
+      ]
     }
   }
 }
