@@ -1,0 +1,32 @@
+{
+  "client": {
+    "name": "NOMBRE DEL CLIENTE",
+    "logo": "/assets/logo.png"
+  },
+  "currency": "CLP",
+  "locale": "es-CL",
+  "meta": {
+    "adAccountId": "",
+    "purchaseActionType": "omni_purchase",
+    "winnerMinSpend": 200000,
+    "useUnifiedAttribution": true,
+    "attributionLabel": "7 días clic / 1 día vista"
+  },
+  "goals": {
+    "roas": 4,
+    "cpa": 16000,
+    "purchasesPerMonth": 300
+  },
+  "strategy": {
+    "default": {
+      "businessObjective": "OBJETIVO DE NEGOCIO DEL CLIENTE",
+      "funnelStage": "conv",
+      "summary": "LECTURA ESTRATÉGICA DEL PERÍODO: QUÉ PASÓ, POR QUÉ Y QUÉ HAREMOS."
+    },
+    "2026-10": {
+      "businessObjective": "OBJETIVO DE NEGOCIO DE OCTUBRE",
+      "funnelStage": "conv",
+      "summary": "RESUMEN DE OCTUBRE: QUÉ PASÓ, POR QUÉ Y QUÉ HAREMOS EN NOVIEMBRE."
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "client": {
+    "name": "[Nombre del cliente]",
+    "logo": ""
+  },
+  "currency": "CLP",
+  "locale": "es-CL",
+  "meta": {
+    "adAccountId": "",
+    "purchaseActionType": "omni_purchase",
+    "winnerMinSpend": 200000,
+    "useUnifiedAttribution": true,
+    "attributionLabel": "7 días clic / 1 día vista"
+  },
+  "goals": {
+    "roas": 4,
+    "cpa": 16000,
+    "purchasesPerMonth": 300
+  },
+  "strategy": {
+    "default": {
+      "businessObjective": "Aumentar las ventas online un 20% frente al mismo mes del año anterior",
+      "funnelStage": "conv",
+      "summary": "Escribe aquí la lectura estratégica del período: qué pasó, por qué y qué haremos el próximo mes."
+    },
+    "2026-10": {
+      "businessObjective": "Aumentar las ventas online un 20% frente a octubre 2025",
+      "funnelStage": "conv",
+      "summary": "Superamos la meta de compras y el ROAS subió gracias al video UGC, que concentró casi un tercio de las ventas. Para noviembre: renovar creatividades (la frecuencia se acerca a 4) y preparar Cyber Monday."
+    }
+  }
+}
