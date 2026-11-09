@@ -1,6 +1,6 @@
 {
   "functions": {
-    "api/meta.js": { "includeFiles": "config.json", "maxDuration": 30 }
+    "api/meta.mjs": { "includeFiles": "config.json", "maxDuration": 30 }
   },
   "headers": [
     { "source": "/(.*)", "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow" }] }
