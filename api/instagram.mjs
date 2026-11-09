@@ -1,7 +1,7 @@
 // Función de Vercel: datos de Instagram orgánico para la hoja Social media.
 import { loadConfig, send, queryOf } from '../lib/config.mjs';
 import { TOKEN } from '../lib/graph.mjs';
-import { TZ, localDate, resolveIg, postsInRange, accountTotals, demographics, captureStories, storedStories, saveFollowerSnapshot, followerSnapshots } from '../lib/ig.mjs';
+import { TZ, localDate, resolveIg, postsInRange, accountTotals, demographics, captureStories, storedStories, saveFollowerSnapshot, followerSnapshots, reachDaily } from '../lib/ig.mjs';
 import { redisConfigured } from '../lib/redis.mjs';
 
 const config = loadConfig();
@@ -29,7 +29,7 @@ async function run(req, res) {
     const ig = await resolveIg();
     // Aprovechamos cada visita para guardar stories activas y el conteo de seguidores.
     await Promise.all([captureStories(ig.id, tz).catch(() => 0), saveFollowerSnapshot(ig.followers_count, tz).catch(() => {})]);
-    const [postsCur, postsPrev, totCur, totPrev, demo, stCur, stPrev, snaps] = await Promise.all([
+    const [postsCur, postsPrev, totCur, totPrev, demo, stCur, stPrev, snaps, reachSeries] = await Promise.all([
       postsInRange(ig.id, since, until, tz),
       postsInRange(ig.id, csince, cuntil, tz),
       accountTotals(ig.id, since, until),
@@ -37,7 +37,8 @@ async function run(req, res) {
       demographics(ig.id).catch(() => ({})),
       storedStories(since, until),
       storedStories(csince, cuntil),
-      followerSnapshots().catch(() => ({}))
+      followerSnapshots().catch(() => ({})),
+      reachDaily(ig.id, since, until).catch(() => [])
     ]);
     const fol = followerChange(snaps, since, until, ig.followers_count, today);
     return send(res, 200, {
@@ -49,7 +50,8 @@ async function run(req, res) {
       posts: { cur: postsCur, prev: postsPrev },
       stories: { cur: stCur, prev: stPrev, tracking: redisConfigured() },
       followers: { current: ig.followers_count ?? null, ...fol },
-      demographics: demo
+      demographics: demo,
+      reachDaily: reachSeries
     }, `s-maxage=${CACHE_SECONDS}, stale-while-revalidate=${CACHE_SECONDS * 4}`);
   } catch (e) {
     const status = e.code === 190 ? 401 : [4, 17, 32, 613].includes(e.code) ? 429 : 502;

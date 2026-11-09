@@ -24,9 +24,10 @@ async function run(req, res) {
       { dateRanges: [cur], dimensions: [{ name: 'deviceCategory' }], metrics: SEG_METRICS, orderBys: byDesc('totalUsers'), limit: 5 },
       { dateRanges: [cur], dimensions: [{ name: 'region' }], metrics: SEG_METRICS, orderBys: byDesc('totalUsers'), limit: 8 },
       { dateRanges: [cur], dimensions: [{ name: 'pagePath' }], metrics: [{ name: 'screenPageViews' }, { name: 'userEngagementDuration' }, { name: 'activeUsers' }, { name: 'engagementRate' }], orderBys: byDesc('screenPageViews'), limit: 8 },
-      { dateRanges: [cur], dimensions: [{ name: 'itemName' }], metrics: [{ name: 'itemsPurchased' }, { name: 'itemRevenue' }], orderBys: byDesc('itemRevenue'), limit: 6 }
+      { dateRanges: [cur], dimensions: [{ name: 'itemName' }], metrics: [{ name: 'itemsPurchased' }, { name: 'itemRevenue' }], orderBys: byDesc('itemRevenue'), limit: 6 },
+      { dateRanges: [cur], dimensions: [{ name: 'date' }], metrics: ['totalUsers', 'newUsers', 'sessions', 'engagementRate', 'userEngagementDuration', 'ecommercePurchases', 'purchaseRevenue', 'keyEvents'].map((name) => ({ name })), orderBys: [{ dimension: { dimensionName: 'date' } }], limit: 400 }
     ]);
-    const [rTot, rFun, rCh, rAge, rDev, rReg, rPages, rItems] = reports.map(rowsOf);
+    const [rTot, rFun, rCh, rAge, rDev, rReg, rPages, rItems, rDaily] = reports.map(rowsOf);
     const pick = (name) => rTot.find((r) => r.dateRange === name) || {};
     const totals = { cur: pick('cur'), prev: pick('prev') };
     for (const k of ['cur', 'prev']) delete totals[k].dateRange;
@@ -43,6 +44,7 @@ async function run(req, res) {
       channels: rCh.map((r) => ({ name: r.sessionDefaultChannelGroup, sessions: r.sessions, conv: ecommerce ? r.ecommercePurchases : r.keyEvents, revenue: r.purchaseRevenue })),
       segments: { edad: seg(rAge, 'userAgeBracket'), disp: seg(rDev, 'deviceCategory'), region: seg(rReg, 'region') },
       pages: rPages.map((r) => ({ path: r.pagePath, views: r.screenPageViews, engagementSec: r.activeUsers ? r.userEngagementDuration / r.activeUsers : null, engagementRate: r.engagementRate })),
+      daily: (rDaily || []).map((r) => ({ ...r, date: `${r.date.slice(0, 4)}-${r.date.slice(4, 6)}-${r.date.slice(6, 8)}` })),
       items: rItems.map((r) => ({ name: r.itemName, qty: r.itemsPurchased, revenue: r.itemRevenue })).filter((x) => x.name && x.name !== '(not set)')
     }, `s-maxage=${CACHE_SECONDS}, stale-while-revalidate=${CACHE_SECONDS * 4}`);
   } catch (e) {
