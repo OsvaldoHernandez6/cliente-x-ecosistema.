@@ -3,8 +3,18 @@
 // El token NUNCA va en el repo: se lee de la variable de entorno META_ACCESS_TOKEN.
 
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
-const config = JSON.parse(readFileSync(new URL('../config.json', import.meta.url), 'utf8'));
+// Lee config.json sin que un problema con el archivo tumbe la función.
+function loadConfig() {
+  const candidates = [join(process.cwd(), 'config.json')];
+  try { candidates.push(new URL('../config.json', import.meta.url)); } catch { /* sin import.meta */ }
+  for (const c of candidates) {
+    try { return JSON.parse(readFileSync(c, 'utf8')); } catch { /* probar el siguiente */ }
+  }
+  return {};
+}
+const config = loadConfig();
 
 const API_VERSION = process.env.META_API_VERSION || 'v26.0';
 const CACHE_SECONDS = Math.max(60, Number(process.env.META_CACHE_SECONDS) || 3600);
@@ -94,18 +104,19 @@ function adFormat(creative = {}) {
 
 const isDate = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
 
-export default async function handler(req, res) {
+async function run(req, res) {
   const send = (status, body, cache) => {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.setHeader('Cache-Control', cache || 'no-store');
-    res.status(status).send(JSON.stringify(body));
+    res.statusCode = status;
+    res.end(JSON.stringify(body));
   };
 
   if (!TOKEN || !ACCOUNT) {
     return send(503, { error: 'not_configured', message: 'Falta configurar META_ACCESS_TOKEN y META_AD_ACCOUNT_ID en Vercel.' });
   }
 
-  const q = req.query || {};
+  const q = req.query || Object.fromEntries(new URL(req.url || '/', 'http://localhost').searchParams);
   const { since, until, csince, cuntil } = q;
   if (![since, until, csince, cuntil].every(isDate)) {
     return send(400, { error: 'bad_request', message: 'Parámetros since, until, csince y cuntil requeridos (AAAA-MM-DD).' });
@@ -193,5 +204,16 @@ export default async function handler(req, res) {
   } catch (e) {
     const status = e.code === 190 ? 401 : e.code === 17 || e.code === 4 || e.code === 613 ? 429 : 502;
     return send(status, { error: 'meta_error', code: e.code ?? null, message: e.message });
+  }
+}
+
+export default async function handler(req, res) {
+  try {
+    return await run(req, res);
+  } catch (e) {
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    res.statusCode = 500;
+    res.end(JSON.stringify({ error: 'server_error', message: String(e?.message || e) }));
   }
 }
