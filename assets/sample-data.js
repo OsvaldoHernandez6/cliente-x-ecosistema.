@@ -103,7 +103,13 @@ export const sampleGa = {
 };
 
 export const sampleSocial = {
-  followers: 18420, followersDelta: 640,
+  live: false,
+  hero: {
+    headline: 'Los reels nos llevaron <span style="color:var(--heroAccent)">lejos</span>; los carruseles nos <span style="color:var(--heroGood)">acercaron</span>.',
+    summary: 'El alcance creció 18% gracias a los reels, que llegaron sobre todo a gente que aún no nos sigue. Los carruseles útiles, como la guía de tallas, generaron la conversación y los guardados.'
+  },
+  followers: 18420, followersDelta: 640, followerSeries: null, valueShare: 33, valueSharePrev: 28,
+  topicsNote: '18% pregunta por tallas: confirma que la guía de tallas responde una necesidad real de la comunidad.',
   tiles: [
     ['Alcance', '212.000', '+18,4%', '179.000', 1],
     ['Interacciones', '9.870', '+12,1%', '8.805', 1],
@@ -113,10 +119,10 @@ export const sampleSocial = {
     ['Publicaciones', '22', '+10,0%', '20', 0]
   ],
   best: [
-    { isVideo: true, badge: 'Mayor alcance', tone: 'accent', fmt: 'Reel · 0:18', kicker: 'Mejor post por alcance', title: 'Cómo combinar zapatillas urbanas en 3 looks', date: '14 de octubre',
+    { thumb: null, link: null, isVideo: true, badge: 'Mayor alcance', tone: 'accent', fmt: 'Reel · 0:18', kicker: 'Mejor post por alcance', title: 'Cómo combinar zapatillas urbanas en 3 looks', date: '14 de octubre',
       main: '48.300', mainLabel: 'personas alcanzadas · 23% del alcance del mes', stats: [['Reproducciones', '71.200'], ['Compartidos', '310'], ['Interacción', '2,1%']],
       why: '78% del alcance vino de personas que no nos siguen: el algoritmo de Reels lo empujó porque la gente lo vio completo y lo compartió.' },
-    { isVideo: false, badge: 'Mayor interacción', tone: 'pos', fmt: 'Carrusel · 8', kicker: 'Mejor post por interacción', title: 'Guía de tallas: encuentra tu número', date: '22 de octubre',
+    { thumb: null, link: null, isVideo: false, badge: 'Mayor interacción', tone: 'pos', fmt: 'Carrusel · 8', kicker: 'Mejor post por interacción', title: 'Guía de tallas: encuentra tu número', date: '22 de octubre',
       main: '9,8%', mainLabel: 'tasa de interacción · 1.240 interacciones', stats: [['Guardados', '410'], ['Comentarios', '96'], ['Alcance', '12.650']],
       why: 'Contenido útil: la gente lo guarda para consultarlo antes de comprar. Los comentarios son preguntas concretas de talla.' }
   ],

@@ -110,7 +110,8 @@ const state = {
   range: 'ant', rFrom: 1, rTo: 1, cmp: 'prev',
   metric: 'revenue', sortKey: 'spend', stageF: 'all', camp: null,
   srcMetric: 'ses', segDim: 'edad', act: 'com', fmt: 'reels',
-  paid: null, paidNote: null, loading: false, animate: true
+  paid: null, paidNote: null, loading: false, animate: true,
+  social: null, socialNote: null, socialLoading: false
 };
 
 /* ============================================================
@@ -148,7 +149,7 @@ const deltaPill = (d) => `<span class="delta num ${d.cls}">${d.arrow} ${esc(d.tx
 
 function staticTile([label, value, dtxt, prev, g], i, sparkSeed) {
   const cls = g === 1 ? 'pos' : g === -1 ? 'neg' : 'neu';
-  const arrow = dtxt.charAt(0) === '+' ? '▲' : '▼';
+  const arrow = dtxt.charAt(0) === '+' ? '▲' : dtxt.charAt(0) === '−' || dtxt.charAt(0) === '-' ? '▼' : '';
   const pts = [];
   for (let k = 0; k < 20; k++) pts.push(Math.sin(k / 2.6 + (sparkSeed ?? i)) * 6 + Math.sin(k * 1.4 + i) * 2 + (arrow === '▲' ? k * 0.35 : -k * 0.35));
   return `<div class="tile rise" style="animation-delay:${(i * 0.04).toFixed(2)}s">
@@ -485,7 +486,7 @@ function paidWinners(d) {
   if (!ads.length) return `<section style="display:flex;flex-direction:column;gap:1.25em">${head}<div class="card"><p class="muted" style="margin:0">Ningún anuncio alcanzó la inversión mínima con compras en este período.</p></div></section>`;
   const avg = d.totals.cur.roas;
   const visual = (a, big) => `<div class="creative" style="${big ? 'flex:1 1 240px;min-height:340px' : 'flex:1;min-height:210px'}">
-    ${a.thumb ? `<img src="${esc(a.thumb)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}
+    ${a.thumb ? `<img src="${esc(a.thumb)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}
     ${a.isVideo ? `<div class="play">${IC.play}</div>` : a.thumb ? '' : IC.image}
     ${a.thumb ? '' : `<span class="small">${a.isVideo ? 'Video del anuncio' : 'Imagen del anuncio'}</span>`}
     <span class="tag num" style="left:1em;background:${big ? 'var(--accent)' : 'var(--text)'};color:${big ? 'var(--onAccent)' : 'var(--bg)'}">#${big ? 1 : a.rank}</span>
@@ -616,113 +617,275 @@ function viewOwned() {
 }
 
 /* ============================================================
-   Social media (Instagram) — datos de ejemplo hasta conectar
+   Social media (Instagram)
    ============================================================ */
-function viewSocial() {
-  const s = sampleSocial;
-  const fol = []; for (let i = 0; i < 20; i++) fol.push(26 - i * 1.1 - 2 * Math.sin(i / 1.7));
-  const folPts = fol.map((v, i) => (i * 100 / 19).toFixed(1) + ',' + v.toFixed(1)).join(' ');
-  const best = s.best.map((b) => `<article class="rise" style="flex:1 1 520px;min-width:0;background:var(--surface);border:1px solid var(--border);border-radius:24px;overflow:hidden;display:flex;flex-wrap:wrap">
-    <div class="creative" style="flex:1 1 200px;min-height:300px">${b.isVideo ? `<div class="play">${IC.play}</div>` : IC.carousel}<span class="small">${b.isVideo ? 'Reel del post' : 'Carrusel del post'}</span>
-      <span class="tag" style="left:1em;background:var(--${b.tone});color:var(--onAccent)">${b.badge}</span><span class="tag" style="right:1em;background:var(--surface);color:var(--text)">${b.fmt}</span></div>
+const KIND_LABEL = { reels: 'Reels', car: 'Carruseles', img: 'Imagen', sto: 'Stories' };
+const KIND_ONE = { reels: 'Reel', car: 'Carrusel', img: 'Imagen', sto: 'Story' };
+const SOCIAL_ACTIONS = [['alc', 'Alcance', 'alcance', 'reach'], ['lik', 'Me gusta', 'más "me gusta"', 'likes'], ['com', 'Comentarios', 'más comentarios', 'comments'], ['sha', 'Compartidos', 'más compartidos', 'shares'], ['sav', 'Guardados', 'más guardados', 'saved'], ['vie', 'Visualizaciones', 'más visualizaciones', 'views']];
+const avg = (xs) => { const v = xs.filter((x) => x != null && !isNaN(x)); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+const sumOf = (xs, k) => xs.reduce((a, x) => a + (Number(x[k]) || 0), 0);
+const shortCaption = (p) => { const c = (p.caption || '').replace(/\s+/g, ' ').trim(); return c ? (c.length > 70 ? c.slice(0, 68) + '…' : c) : KIND_ONE[p.kind] + ' del ' + dayLabel(p.date); };
+const COUNTRY = (() => { try { const dn = new Intl.DisplayNames(['es'], { type: 'region' }); return (c) => { try { return dn.of(c) || c; } catch { return c; } }; } catch { return (c) => c; } })();
+
+// Convierte la respuesta de /api/instagram al formato que dibuja la hoja.
+function adaptSocial(d, r) {
+  const posts = d.posts.cur || [], prevPosts = d.posts.prev || [];
+  const stories = d.stories?.cur || [], prevStories = d.stories?.prev || [];
+  const T = d.totals.cur || {}, P = d.totals.prev || {};
+  const rate = (t) => (t.reach ? ((t.total_interactions || 0) / t.reach) * 100 : null);
+  const tile = (label, cur, prev, f, good = 1) => { const dl = delta(cur, prev, good); return [label, f(cur), dl.txt, f(prev), dl.cls === 'pos' ? 1 : dl.cls === 'neg' ? -1 : 0]; };
+  const tiles = [
+    tile('Alcance', T.reach, P.reach, F.int),
+    tile('Visualizaciones', T.views, P.views, F.int),
+    tile('Interacciones', T.total_interactions, P.total_interactions, F.int),
+    tile('Tasa de interacción', rate(T), rate(P), (n) => F.pct(n)),
+    tile('Clics en enlaces del perfil', T.profile_links_taps, P.profile_links_taps, F.int),
+    tile('Publicaciones', posts.length, prevPosts.length, F.int, 0)
+  ];
+
+  const byKind = { reels: [], car: [], img: [], sto: stories };
+  for (const p of posts) (byKind[p.kind] || byKind.img).push(p);
+  const kinds = ['reels', 'car', 'img', 'sto'].filter((k) => byKind[k].length);
+
+  const formats = kinds.map((k) => {
+    const xs = byKind[k];
+    return { key: k, fmt: KIND_LABEL[k], n: xs.length + (k === 'img' || k === 'sto' ? (xs.length === 1 ? ' publicada' : ' publicadas') : (xs.length === 1 ? ' publicado' : ' publicados')),
+      v: SOCIAL_ACTIONS.map(([, , , key]) => {
+        if (k === 'sto' && (key === 'likes' || key === 'saved')) return null;
+        const field = k === 'sto' && key === 'comments' ? 'replies' : key;
+        const a = avg(xs.map((x) => x[field]));
+        return a == null ? null : Math.round(a);
+      }) };
+  });
+  const actionInsights = SOCIAL_ACTIONS.map(([, label], j) => {
+    const rows = formats.filter((f) => f.v[j] != null).sort((a, b) => b.v[j] - a.v[j]);
+    if (!rows.length) return 'Sin datos suficientes para esta acción en el período.';
+    if (rows.length === 1) return `${rows[0].fmt} promedió ${F.int(rows[0].v[j])} en ${label.toLowerCase()} por publicación.`;
+    const ratio = rows[1].v[j] ? rows[0].v[j] / rows[1].v[j] : null;
+    return `${rows[0].fmt} lidera en ${label.toLowerCase()}: ${F.int(rows[0].v[j])} por publicación${ratio && ratio >= 1.05 ? ', ' + F.dec(ratio, 1) + ' veces más que ' + rows[1].fmt.toLowerCase() : ', muy parejo con ' + rows[1].fmt.toLowerCase()}.`;
+  });
+
+  const withReach = posts.filter((p) => p.reach);
+  const bestReach = withReach.slice().sort((a, b) => b.reach - a.reach)[0];
+  const avgReach = avg(withReach.map((p) => p.reach)) || 0;
+  const engCands = withReach.filter((p) => p.reach >= avgReach * 0.3 && p.id !== bestReach?.id);
+  const bestEng = (engCands.length ? engCands : withReach).slice().sort((a, b) => b.interactions / b.reach - a.interactions / a.reach)[0];
+  const totalPostReach = sumOf(withReach, 'reach');
+  const best = [];
+  if (bestReach) best.push({ isVideo: bestReach.kind === 'reels', badge: 'Mayor alcance', tone: 'accent', fmt: KIND_ONE[bestReach.kind], kicker: 'Mejor post por alcance', title: shortCaption(bestReach), date: dayLabel(bestReach.date),
+    main: F.int(bestReach.reach), mainLabel: 'cuentas alcanzadas' + (totalPostReach ? ' · ' + F.dec((bestReach.reach / totalPostReach) * 100, 0) + '% del alcance de las publicaciones' : ''),
+    stats: [['Visualizaciones', F.int(bestReach.views)], ['Compartidos', F.int(bestReach.shares)], ['Interacción', F.pct((bestReach.interactions / bestReach.reach) * 100, 1)]],
+    why: `Alcanzó ${F.dec(avgReach ? bestReach.reach / avgReach : 0, 1)} veces el promedio de las publicaciones del período.`, thumb: bestReach.thumb, link: bestReach.permalink });
+  if (bestEng) best.push({ isVideo: bestEng.kind === 'reels', badge: 'Mayor interacción', tone: 'pos', fmt: KIND_ONE[bestEng.kind], kicker: 'Mejor post por interacción', title: shortCaption(bestEng), date: dayLabel(bestEng.date),
+    main: F.pct((bestEng.interactions / bestEng.reach) * 100, 1), mainLabel: 'tasa de interacción · ' + F.int(bestEng.interactions) + ' interacciones',
+    stats: [['Guardados', F.int(bestEng.saved)], ['Comentarios', F.int(bestEng.comments)], ['Alcance', F.int(bestEng.reach)]],
+    why: bestEng.saved >= bestEng.comments ? `Se guardó ${F.int(bestEng.saved)} veces: contenido al que la gente quiere volver.` : `Generó ${F.int(bestEng.comments)} comentarios: abrió conversación con la comunidad.`, thumb: bestEng.thumb, link: bestEng.permalink });
+
+  const demo = d.demographics || {};
+  const pctList = (arr) => { const t = arr.reduce((a, x) => a + x[1], 0) || 1; return arr.map(([l, v]) => [l, Math.round((v / t) * 100)]); };
+  const ageOrder = ['13-17', '18-24', '25-34', '35-44', '45-54', '55-64', '65+'];
+  const ages = pctList((demo.age || []).slice().sort((a, b) => ageOrder.indexOf(a[0]) - ageOrder.indexOf(b[0]))).map(([l, p]) => [l.replace('-', '–'), p]);
+  const gender = pctList((demo.gender || []).map(([g, v]) => [g === 'F' ? 'Mujeres' : g === 'M' ? 'Hombres' : 'Otro', v])).filter((x) => x[1] > 0);
+  const cs = (demo.country || []).slice().sort((a, b) => b[1] - a[1]);
+  const ctot = cs.reduce((a, x) => a + x[1], 0) || 1;
+  const countries = cs.slice(0, 5).map(([c, v]) => [COUNTRY(c), Math.round((v / ctot) * 100)]);
+  if (cs.length > 5) countries.push(['Otros', Math.round((cs.slice(5).reduce((a, x) => a + x[1], 0) / ctot) * 100)]);
+
+  const deep = {};
+  const topList = (xs, key, unit) => xs.slice().sort((a, b) => (b[key] || 0) - (a[key] || 0)).slice(0, 3).map((p) => [shortCaption(p), dayLabel(p.date), F.int(p[key]) + ' ' + unit]);
+  const accAvg = avgReach;
+  if (byKind.reels.length) { const xs = byKind.reels; const ar = avg(xs.map((x) => x.reach)); const w = avg(xs.map((x) => x.avgWatchMs));
+    deep.reels = { label: 'Reels', title: 'Reels: alcance y visualizaciones', kpis: [['Publicados', F.int(xs.length)], ['Visualizaciones promedio', F.int(avg(xs.map((x) => x.views)))], ['Tiempo medio de visualización', w != null ? F.dec(w / 1000, 1) + ' s' : '—'], ['Compartidos promedio', F.int(avg(xs.map((x) => x.shares)))]],
+      top: topList(xs, 'reach', 'alcance'), ins: `Los reels promediaron ${F.int(ar)} de alcance por publicación${accAvg ? ', ' + F.dec(ar / accAvg, 1) + ' veces el promedio de la cuenta' : ''}.${w != null ? ' Con ' + F.dec(w / 1000, 1) + ' s de visualización media, conviene que el mensaje clave aparezca en los primeros segundos.' : ''}` }; }
+  if (byKind.car.length) { const xs = byKind.car; const sr = sumOf(xs, 'reach');
+    deep.car = { label: 'Carruseles', title: 'Carruseles: guardados e interacción', kpis: [['Publicados', F.int(xs.length)], ['Alcance promedio', F.int(avg(xs.map((x) => x.reach)))], ['Guardados promedio', F.int(avg(xs.map((x) => x.saved)))], ['Tasa de interacción', sr ? F.pct((sumOf(xs, 'interactions') / sr) * 100) : '—']],
+      top: topList(xs, 'saved', 'guardados'), ins: `Los carruseles promediaron ${F.int(avg(xs.map((x) => x.saved)))} guardados por publicación. El contenido útil (guías, comparativas) suele ser el que más se guarda.` }; }
+  if (byKind.img.length) { const xs = byKind.img; const sr = sumOf(xs, 'reach');
+    deep.img = { label: 'Imágenes', title: 'Imagen fija', kpis: [['Publicadas', F.int(xs.length)], ['Alcance promedio', F.int(avg(xs.map((x) => x.reach)))], ['Tasa de interacción', sr ? F.pct((sumOf(xs, 'interactions') / sr) * 100) : '—'], ['Guardados promedio', F.int(avg(xs.map((x) => x.saved)))]],
+      top: topList(xs, 'reach', 'alcance'), ins: `Las imágenes promediaron ${F.int(avg(xs.map((x) => x.reach)))} de alcance por publicación${accAvg ? ' (' + F.dec(avg(xs.map((x) => x.reach)) / accAvg, 1) + ' veces el promedio de la cuenta)' : ''}.` }; }
+  let retention = null;
+  if (stories.length) {
+    const days = {};
+    for (const s of stories) (days[s.date] = days[s.date] || []).push(s);
+    const pos = [];
+    for (const list of Object.values(days)) { list.sort((a, b) => a.timestamp.localeCompare(b.timestamp)); list.slice(0, 6).forEach((s, i) => { (pos[i] = pos[i] || []).push(s.reach || 0); }); }
+    const curve = pos.filter((p) => p.length >= 2).map((p) => avg(p));
+    if (curve.length >= 2) retention = curve.map((v) => Math.round(v));
+    const last = retention ? Math.round((retention[retention.length - 1] / retention[0]) * 100) : null;
+    deep.sto = { label: 'Stories', title: 'Stories: la conversación diaria', kpis: [['Publicadas', F.int(stories.length)], ['Alcance promedio', F.int(avg(stories.map((x) => x.reach)))], ['Llegan a la última', last != null ? last + '%' : '—'], ['Respuestas', F.int(sumOf(stories, 'replies'))]],
+      top: topList(stories, 'reach', 'alcance'), retention,
+      ins: last != null ? `De quienes ven la primera story del día, ${last}% llega a la ${retention.length}ª. Secuencias cortas y con encuestas o preguntas sostienen la atención.` : 'Aún hay pocas secuencias registradas para calcular la retención.' };
+  }
+
+  const ints = [['Me gusta', sumOf(posts, 'likes'), 'var(--prev)'], ['Guardados', sumOf(posts, 'saved'), 'var(--c2)'], ['Compartidos', sumOf(posts, 'shares'), 'var(--accent)'], ['Comentarios', sumOf(posts, 'comments'), 'var(--c4)']];
+  const tot = ints.reduce((a, x) => a + x[1], 0);
+  const valueOf = (xs) => { const t = sumOf(xs, 'likes') + sumOf(xs, 'saved') + sumOf(xs, 'shares') + sumOf(xs, 'comments'); return t ? ((sumOf(xs, 'saved') + sumOf(xs, 'shares') + sumOf(xs, 'comments')) / t) * 100 : null; };
+
+  const sc = { ...(CONFIG.social?.default || {}), ...(CONFIG.social?.[r.monthKey] || {}) };
+  const topKind = kinds.filter((k) => k !== 'sto').sort((a, b) => sumOf(byKind[b], 'reach') - sumOf(byKind[a], 'reach'))[0];
+  const reachDl = delta(T.reach, P.reach, 1);
+  return {
+    live: true, username: d.account?.username, followers: d.followers?.current, followersDelta: d.followers?.delta,
+    followerSeries: (d.followers?.series || []).map((x) => x.value),
+    tiles, best, ages, gender, countries, actions: SOCIAL_ACTIONS, formats, actionInsights, deep,
+    interactions: tot ? ints : [], valueShare: valueOf(posts), valueSharePrev: valueOf(prevPosts),
+    topics: sc.commentTopics || null, conclusions: sc.conclusions || [], recos: sc.recos || [], mix: sc.mix || null,
+    topicsNote: sc.topicsNote || null, demoInsight: sc.demoInsight,
+    hero: {
+      headline: T.reach != null ? `Alcanzamos <span style="color:var(--heroAccent)">${F.int(T.reach)}</span> cuentas${topKind ? `; ${esc(KIND_LABEL[topKind].toLowerCase())} lideraron el alcance` : ''}.` : 'Resumen de social media',
+      summary: sc.summary || (reachDl.txt !== '—' ? `El alcance varió ${reachDl.txt} frente al período anterior, con ${posts.length} publicaciones y ${stories.length} stories registradas.` : '')
+    },
+    demoNote: !ages.length && !countries.length ? 'Instagram entrega la demografía solo a cuentas con 100 seguidores o más.' : null,
+    storiesNote: d.stories?.tracking ? (stories.length ? null : 'Todavía no hay stories registradas en este período. Se guardan desde que se activó el registro diario.') : 'Para medir stories hay que conectar Upstash: Instagram solo entrega sus métricas mientras están publicadas.',
+    approxReach: T.approxReach
+  };
+}
+
+function socialBanner(s) {
+  if (state.socialLoading) return banner('', 'Actualizando datos de Instagram…');
+  if (s.live) return banner('live', `Conectado a Instagram${s.username ? ' · @' + esc(s.username) : ''}`);
+  const n = state.socialNote;
+  if (n?.kind === 'meta_error') return banner('warn', '<strong>Instagram respondió con un error:</strong> ' + esc(n.message) + ' · Se muestran datos de ejemplo.');
+  if (n?.kind === 'not_configured') return banner('', '<strong>Datos de ejemplo.</strong> Falta configurar el token de Meta en Vercel.');
+  return banner('', '<strong>Datos de ejemplo.</strong> No se pudo contactar el servidor del dashboard.');
+}
+
+function viewSocial(r) {
+  const s = state.social && state.social.source === 'instagram' ? adaptSocial(state.social, r) : sampleSocial;
+  const fs = s.followerSeries && s.followerSeries.length >= 2 ? s.followerSeries : null;
+  const folPts = fs ? sparkPoints(fs, 100, 30) : sparkPoints(Array.from({ length: 20 }, (_, i) => i * 1.1 + 2 * Math.sin(i / 1.7)), 100, 30);
+  const img = (b) => (b.thumb ? `<img src="${esc(b.thumb)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : '');
+  const best = s.best.length ? s.best.map((b) => `<article class="rise" style="flex:1 1 520px;min-width:0;background:var(--surface);border:1px solid var(--border);border-radius:24px;overflow:hidden;display:flex;flex-wrap:wrap">
+    <div class="creative" style="flex:1 1 200px;min-height:300px">${img(b)}${b.isVideo ? `<div class="play">${IC.play}</div>` : b.thumb ? '' : IC.carousel}${b.thumb ? '' : `<span class="small">${b.isVideo ? 'Reel del post' : 'Imagen del post'}</span>`}
+      <span class="tag" style="left:1em;background:var(--${b.tone});color:var(--onAccent)">${esc(b.badge)}</span><span class="tag" style="right:1em;background:var(--surface);color:var(--text)">${esc(b.fmt)}</span></div>
     <div style="flex:1 1 260px;padding:1.75em;display:flex;flex-direction:column;justify-content:center;gap:1em">
-      <div><div class="kicker" style="color:var(--${b.tone})">${b.kicker}</div><div style="margin-top:0.3em;font-size:1.1875em;font-weight:500;line-height:1.3">${b.title}</div><div class="small muted">Publicado el ${b.date}</div></div>
-      <div><div class="num" style="font-size:2.75em;font-weight:300;line-height:1;letter-spacing:-0.03em;color:var(--${b.tone})">${b.main}</div><div class="small muted">${b.mainLabel}</div></div>
-      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0.6em">${b.stats.map(([l, v]) => `<div><div class="xs muted">${l}</div><div class="num" style="font-size:1.125em">${v}</div></div>`).join('')}</div>
-      <div class="small" style="padding:0.8em 0.9em;border-radius:12px;background:var(--surface2)">${b.why}</div>
-    </div></article>`).join('');
-  const aIdx = Math.max(0, s.actions.findIndex((a) => a[0] === state.act));
-  const colMax = s.actions.map((_, j) => Math.max(...s.formats.map((r) => r.v[j] || 0)));
-  const colAvg = s.actions.map((_, j) => { const xs = s.formats.map((r) => r.v[j]).filter((x) => x !== null); return xs.reduce((a, b) => a + b, 0) / xs.length; });
-  const nfK = (x) => (x >= 1000 ? F.dec(x / 1000, 1) + 'K' : String(x));
-  const matrix = `<div style="overflow-x:auto"><div style="min-width:760px;display:grid;grid-template-columns:8.5em repeat(6,minmax(0,1fr));gap:6px">
+      <div><div class="kicker" style="color:var(--${b.tone})">${esc(b.kicker)}</div><div style="margin-top:0.3em;font-size:1.1875em;font-weight:500;line-height:1.3">${esc(b.title)}</div><div class="small muted">Publicado el ${esc(b.date)}</div></div>
+      <div><div class="num" style="font-size:2.75em;font-weight:300;line-height:1;letter-spacing:-0.03em;color:var(--${b.tone})">${esc(b.main)}</div><div class="small muted">${esc(b.mainLabel)}</div></div>
+      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0.6em">${b.stats.map(([l, v]) => `<div><div class="xs muted">${esc(l)}</div><div class="num" style="font-size:1.125em">${esc(v)}</div></div>`).join('')}</div>
+      <div class="small" style="padding:0.8em 0.9em;border-radius:12px;background:var(--surface2)">${esc(b.why)}</div>
+      ${b.link ? `<a href="${esc(b.link)}" target="_blank" rel="noopener" class="small" style="display:inline-flex;align-items:center;gap:0.35em;color:var(--accent);font-weight:500">Ver publicación ${IC.ext}</a>` : ''}
+    </div></article>`).join('') : `<div class="card" style="flex:1"><p class="muted" style="margin:0">No hay publicaciones en el feed para este período.</p></div>`;
+
+  // Matriz formato × acción
+  const actIds = s.actions.map((a) => a[0]);
+  const aIdx = Math.max(0, actIds.indexOf(state.act));
+  const colMax = s.actions.map((_, j) => Math.max(0, ...s.formats.map((r2) => r2.v[j] || 0)));
+  const colAvg = s.actions.map((_, j) => avg(s.formats.map((r2) => r2.v[j])));
+  const nfK = (x) => (x >= 1000 ? F.dec(x / 1000, 1) + 'K' : F.int(x));
+  const matrix = s.formats.length ? `<div style="overflow-x:auto"><div style="min-width:760px;display:grid;grid-template-columns:8.5em repeat(${s.actions.length},minmax(0,1fr));gap:6px">
     <span></span>${s.actions.map(([id, l], j) => `<button type="button" class="pill btn" data-act="act" data-v="${id}" aria-pressed="${j === aIdx}" style="border-radius:10px;min-height:44px;font-size:0.8125em;font-weight:600">${l}</button>`).join('')}
-    ${s.formats.map((r) => `<span style="display:flex;flex-direction:column;justify-content:center;font-weight:600;font-size:0.875em">${r.fmt}<span class="xs muted" style="font-weight:400">${r.n}</span></span>${r.v.map((x, j) => {
+    ${s.formats.map((r2) => `<span style="display:flex;flex-direction:column;justify-content:center;font-weight:600;font-size:0.875em">${esc(r2.fmt)}<span class="xs muted" style="font-weight:400">${esc(r2.n)}</span></span>${r2.v.map((x, j) => {
       if (x === null) return `<div class="num" style="min-height:56px;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--surface2);color:var(--muted);${j === aIdx ? '' : 'opacity:0.6'}"><span>—</span><span class="xs">no aplica</span></div>`;
-      const mix = Math.round(8 + 80 * (x / colMax[j]));
-      return `<div class="num" style="min-height:56px;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;transition:opacity .2s ease;background:color-mix(in srgb,var(--accent) ${mix}%,var(--surface));color:${mix > 50 ? 'var(--onAccent)' : 'var(--text)'};${j === aIdx ? 'box-shadow:0 0 0 2px var(--accent) inset' : 'opacity:0.45'}"><span style="font-weight:600">${nfK(x)}</span><span style="font-size:0.6875em;opacity:0.85">${F.dec(x / colAvg[j], 1)}x prom.</span></div>`;
+      const mix = colMax[j] ? Math.round(8 + 80 * (x / colMax[j])) : 8;
+      return `<div class="num" style="min-height:56px;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;transition:opacity .2s ease;background:color-mix(in srgb,var(--accent) ${mix}%,var(--surface));color:${mix > 50 ? 'var(--onAccent)' : 'var(--text)'};${j === aIdx ? 'box-shadow:0 0 0 2px var(--accent) inset' : 'opacity:0.45'}"><span style="font-weight:600">${nfK(x)}</span><span style="font-size:0.6875em;opacity:0.85">${colAvg[j] ? F.dec(x / colAvg[j], 1) + 'x prom.' : ''}</span></div>`;
     }).join('')}`).join('')}
-  </div></div>`;
-  const rank = s.formats.filter((r) => r.v[aIdx] !== null).sort((a, b) => b.v[aIdx] - a.v[aIdx]).map((r, i) => `<div style="display:grid;grid-template-columns:6em minmax(0,1fr) 4.5em;gap:0.6em;align-items:center;font-size:0.8125em"><span style="font-weight:500">${r.fmt}</span><div class="track" style="height:12px;background:var(--surface)"><div class="fill" style="width:${((r.v[aIdx] / colMax[aIdx]) * 100).toFixed(1)}%;background:var(--accent);opacity:${(1 - i * 0.2).toFixed(2)}"></div></div><span class="num" style="text-align:right;font-weight:600">${nfK(r.v[aIdx])}</span></div>`).join('');
-  const D = s.deep[state.fmt] || s.deep.reels;
-  const ret = D.retention ? `<div style="display:flex;flex-direction:column;gap:0.5em"><h3 class="h3">Retención en una secuencia de stories</h3>
+  </div></div>` : '<p class="muted">Sin publicaciones en el período.</p>';
+  const rank = s.formats.filter((r2) => r2.v[aIdx] !== null).sort((a, b) => b.v[aIdx] - a.v[aIdx]).map((r2, i) => `<div style="display:grid;grid-template-columns:6em minmax(0,1fr) 4.5em;gap:0.6em;align-items:center;font-size:0.8125em"><span style="font-weight:500">${esc(r2.fmt)}</span><div class="track" style="height:12px;background:var(--surface)"><div class="fill" style="width:${colMax[aIdx] ? ((r2.v[aIdx] / colMax[aIdx]) * 100).toFixed(1) : 0}%;background:var(--accent);opacity:${(1 - i * 0.2).toFixed(2)}"></div></div><span class="num" style="text-align:right;font-weight:600">${nfK(r2.v[aIdx])}</span></div>`).join('');
+
+  // Profundiza por formato
+  const deepKeys = Object.keys(s.deep);
+  const fk = deepKeys.includes(state.fmt) ? state.fmt : deepKeys[0];
+  const D = fk ? s.deep[fk] : null;
+  const ret = D?.retention ? `<div style="display:flex;flex-direction:column;gap:0.5em"><h3 class="h3">Retención en una secuencia de stories</h3>
     <div style="display:flex;align-items:flex-end;gap:8px;height:140px">${D.retention.map((v, i) => `<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:0.3em;height:100%"><span class="num xs" style="font-weight:600">${Math.round((v / D.retention[0]) * 100)}%</span><div style="width:100%;border-radius:8px 8px 0 0;background:var(--accent);height:${((v / D.retention[0]) * 100).toFixed(1)}%;opacity:${(1 - i * 0.1).toFixed(2)}"></div></div>`).join('')}</div>
     <div class="num xs muted" style="display:flex;gap:8px">${D.retention.map((_, i) => `<span style="flex:1;text-align:center">${i + 1}ª</span>`).join('')}</div></div>` : '';
+  const deepCard = D ? `<section class="card">${sectionHead('Profundiza por formato', esc(D.title), seg('Formato', deepKeys.map((k) => [k, s.deep[k].label]), 'fmt', fk))}
+      <div class="tiles" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1em">${D.kpis.map(([l, v]) => `<div style="padding:1.25em 1.375em;border-radius:14px;background:var(--surface2)"><div class="small muted">${esc(l)}</div><div class="num" style="font-size:1.5em;font-weight:300">${esc(v)}</div></div>`).join('')}</div>
+      <div class="row">
+        <div style="flex:1 1 420px;min-width:0;display:flex;flex-direction:column;gap:0.5em"><h3 class="h3">Mejores del período</h3>
+          ${D.top.map(([n, dt, v], i) => `<div style="display:grid;grid-template-columns:2em minmax(0,1fr) auto;gap:0.75em;align-items:center;padding:0.75em 0.5em;border-bottom:1px solid var(--border);font-size:0.875em"><span class="num" style="width:1.75em;height:1.75em;border-radius:8px;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-weight:600">${i + 1}</span><span style="min-width:0"><span class="ellipsis" style="font-weight:500">${esc(n)}</span><span class="xs muted">${esc(dt)}</span></span><span class="num" style="font-weight:600">${esc(v)}</span></div>`).join('')}
+        </div>
+        <div style="flex:1 1 380px;min-width:0;display:flex;flex-direction:column;gap:1em">${ret}<div class="insight"><div class="kicker">Lectura</div><div style="font-weight:500;line-height:1.5">${esc(D.ins)}</div></div></div>
+      </div>
+      ${s.storiesNote && fk === 'sto' ? `<div class="xs muted">${esc(s.storiesNote)}</div>` : ''}
+    </section>` : '';
+  const stNote = s.storiesNote && !s.deep.sto ? `<div class="xs muted">${esc(s.storiesNote)}</div>` : '';
+
+  // Demografía
+  const ageMax = Math.max(1, ...s.ages.map((a) => a[1]));
+  const cMax = Math.max(1, ...s.countries.map((a) => a[1]));
+  const demoCard = `<section class="card">${sectionHead('Demografía de la comunidad', '¿Quiénes nos siguen?')}
+      ${s.demoNote ? `<p class="muted" style="margin:0">${esc(s.demoNote)}</p>` : `<div class="row">
+        <div style="flex:1 1 320px;min-width:0;display:flex;flex-direction:column;gap:0.6em"><h3 class="h3">Edad</h3>
+          ${s.ages.map(([l, p]) => barRow(l, p + '%', ((p / ageMax) * 100).toFixed(1) + '%', p === ageMax ? 'var(--accent)' : 'var(--prev)', '4em', '3em')).join('')}
+          ${s.gender.length ? `<div class="grow" style="display:flex;height:28px;gap:3px;border-radius:8px;overflow:hidden;margin-top:0.5em">${s.gender.map(([l, p], i) => `<div style="flex:${p} 1 0;background:${['var(--c4)', 'var(--c2)', 'var(--c5)'][i % 3]};color:var(--onAccent);font-size:0.8125em;font-weight:600;display:flex;align-items:center;padding:0 0.75em;white-space:nowrap;overflow:hidden">${esc(l)} ${p}%</div>`).join('')}</div>` : ''}
+        </div>
+        <div style="flex:1 1 320px;min-width:0;display:flex;flex-direction:column;gap:0.6em"><h3 class="h3">Países</h3>
+          ${s.countries.map(([l, p], i) => barRow(l, p + '%', Math.max(2, (p / cMax) * 100).toFixed(1) + '%', i ? 'var(--prev)' : 'var(--accent)', '6.5em', '3em', !i)).join('')}
+        </div>
+        ${s.demoInsight !== undefined || !s.live ? `<div class="insight" style="flex:1 1 260px;justify-content:center"><div class="kicker">Hallazgo</div><div style="font-size:1.0625em;font-weight:500;line-height:1.45">${esc(s.demoInsight || 'La comunidad es joven-adulta y chilena: el tramo 25–34 años es también el que más compra en el sitio. Le hablamos a la persona correcta.')}</div></div>` : ''}
+      </div>`}
+    </section>`;
+
+  // Interacciones
   const totInt = s.interactions.reduce((a, x) => a + x[1], 0);
-  return `<div class="stack">
-    ${banner('', '<strong>Datos de ejemplo.</strong> La conexión con Instagram es una etapa siguiente.')}
+  const vs = s.valueShare, vsp = s.valueSharePrev;
+  const intCard = `<section class="card">${sectionHead('Interacciones del contenido', '¿Cómo interactúa la comunidad?')}
+      <div class="row">
+        <div style="flex:1 1 440px;min-width:0;display:flex;flex-direction:column;gap:0.875em">
+          ${totInt ? `<div class="small" style="font-weight:600">${F.int(totInt)} interacciones en publicaciones del feed</div>
+          <div class="grow" style="display:flex;height:40px;gap:3px;border-radius:10px;overflow:hidden">${s.interactions.filter((x) => x[1] > 0).map(([, v, c]) => { const p = (v / totInt) * 100; return `<div style="flex:${v} 1 0;background:${c};display:flex;align-items:center;justify-content:center;color:var(--onAccent);font-size:0.8125em;font-weight:600">${p >= 9 ? F.dec(p, 0) + '%' : ''}</div>`; }).join('')}</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:0.6em">${s.interactions.map(([l, v, c]) => `<div style="display:flex;gap:0.5em"><span style="width:10px;height:10px;margin-top:0.4em;border-radius:3px;flex:none;background:${c}"></span><span><span class="small muted" style="display:block">${esc(l)}</span><span class="num" style="font-weight:600">${F.int(v)} <span class="small muted" style="font-weight:400">${F.dec((v / totInt) * 100, 0)}%</span></span></span></div>`).join('')}</div>
+          ${vs != null ? `<div style="display:flex;align-items:center;gap:1em;padding:1em 1.125em;border-radius:14px;background:var(--surface2)"><div class="num" style="font-size:2em;font-weight:300;color:var(--pos)">${F.dec(vs, 0)}%</div><div class="small">son <strong>interacciones de valor</strong> (comentarios, compartidos y guardados)${vsp != null ? ', contra ' + F.dec(vsp, 0) + '% en el período anterior' : ''}.</div></div>` : ''}` : '<p class="muted">Sin interacciones registradas en el período.</p>'}
+        </div>
+        <div style="flex:1 1 380px;min-width:0;display:flex;flex-direction:column;gap:0.6em">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;gap:0.5em"><h3 class="h3">¿De qué hablan en los comentarios?</h3><span class="xs muted">Clasificación manual</span></div>
+          ${s.topics && s.topics.length ? (() => { const tm = Math.max(...s.topics.map((t) => t[1])); return s.topics.map(([l, p, k]) => barRow(l, p + '%', ((p / tm) * 100).toFixed(1) + '%', k === 'hl' ? 'var(--accent)' : k === 'neg' ? 'var(--neg)' : 'var(--prev)', '11em', '3em')).join(''); })() + (s.topicsNote ? `<div class="small muted">${esc(s.topicsNote)}</div>` : '')
+            : '<p class="small muted" style="margin:0">Agrega la clasificación de comentarios del mes en <code>config.json → social → commentTopics</code>.</p>'}
+        </div>
+      </div>
+    </section>`;
+
+  const conclCard = `<section style="display:flex;flex-direction:column;gap:1.25em">${sectionHead('Conclusiones cualitativas', 'Lo que nos dijo la comunidad')}
+      ${s.conclusions.length ? `<div class="tiles" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr))">${s.conclusions.map(([t, d2], i) => `<article class="tile rise" style="padding:1.75em;border-radius:24px;gap:0.6em;animation-delay:${0.06 * i}s"><span class="num" style="font-size:2em;font-weight:300;color:var(--accent);line-height:1">0${i + 1}</span><div style="font-weight:500;font-size:1.0625em;line-height:1.4">${esc(t)}</div><div class="small muted">${esc(d2)}</div></article>`).join('')}</div>`
+        : '<div class="card"><p class="muted" style="margin:0">Escribe las conclusiones del mes en <code>config.json → social → conclusions</code>.</p></div>'}
+    </section>`;
+  const mix = s.mix || null;
+  const recoCard = `<section class="hero" style="flex-direction:column;flex-wrap:nowrap;align-items:stretch;gap:1.5em" aria-labelledby="recs">
+      <div class="row" style="justify-content:space-between;align-items:flex-end;gap:1em">
+        <div><div class="kicker">Recomendaciones de contenido</div><h2 id="recs" class="h2" style="font-size:1.85em;font-weight:300">Qué publicar el próximo mes</h2></div>
+        ${mix ? `<div style="flex:0 1 380px;min-width:260px;display:flex;flex-direction:column;gap:0.4em"><div class="xs" style="color:var(--heroMuted)">Mix sugerido para el feed</div>
+          <div style="display:flex;height:30px;gap:3px;border-radius:8px;overflow:hidden">${mix.map(([l, p], i) => `<div style="flex:${p} 1 0;background:${['var(--heroAccent)', 'var(--heroGood)', 'var(--heroMuted)'][i % 3]};color:#1F1D19;font-size:0.75em;font-weight:600;display:flex;align-items:center;padding:0 0.6em;white-space:nowrap;overflow:hidden">${esc(l)} ${p}%</div>`).join('')}</div></div>` : ''}
+      </div>
+      ${s.recos.length ? `<div class="tiles" style="grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:1em">${s.recos.map(([f, fr, t, d2, g]) => `<article style="padding:1.375em;border-radius:18px;background:var(--heroTrack);display:flex;flex-direction:column;gap:0.6em">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5em"><span class="badge" style="background:var(--heroText);color:#1F1D19">${esc(f)}</span><span class="xs num" style="color:var(--heroMuted)">${esc(fr)}</span></div>
+        <div style="font-size:1.125em;font-weight:500;line-height:1.3">${esc(t)}</div><div class="small" style="color:var(--heroMuted)">${esc(d2)}</div>
+        <div class="small" style="margin-top:auto;padding-top:0.6em;border-top:1px solid var(--heroTrack)"><span style="color:var(--heroMuted)">Objetivo:</span> <strong style="color:var(--heroGood);font-weight:600">${esc(g)}</strong></div></article>`).join('')}</div>`
+        : '<p style="margin:0;color:var(--heroMuted)">Escribe las recomendaciones del mes en <code>config.json → social → recos</code>.</p>'}
+    </section>`;
+
+  const fd = s.followersDelta;
+  return `<div class="stack ${state.socialLoading ? 'loading-veil' : ''}">
+    ${s.live === undefined ? banner('', '<strong>Datos de ejemplo.</strong>') : socialBanner(s)}
     <section class="hero rise" aria-labelledby="soh">
       <div style="flex:1 1 520px;min-width:0;display:flex;flex-direction:column;gap:1.1em">
-        <div class="kicker">Social media · Instagram</div>
-        <h1 id="soh">Los reels nos llevaron <span style="color:var(--heroAccent)">lejos</span>; los carruseles nos <span style="color:var(--heroGood)">acercaron</span>.</h1>
-        <p>El alcance creció 18% gracias a los reels, que llegaron sobre todo a gente que aún no nos sigue. Los carruseles útiles, como la guía de tallas, generaron la conversación y los guardados.</p>
+        <div class="kicker">Social media · Instagram${s.username ? ' · @' + esc(s.username) : ''} · ${esc(r.label)}</div>
+        <h1 id="soh">${s.hero.headline}</h1>
+        ${s.hero.summary ? `<p>${esc(s.hero.summary)}</p>` : ''}
       </div>
       <div style="flex:1 1 300px;min-width:0;padding:1.5em;border-radius:18px;background:var(--heroTrack);display:flex;flex-direction:column;gap:0.35em">
         <div class="xs" style="color:var(--heroMuted)">Comunidad</div>
         <div class="num" style="font-size:3em;font-weight:300;line-height:1;letter-spacing:-0.03em">${F.int(s.followers)}</div>
-        <div class="small" style="color:var(--heroMuted)">seguidores · <span class="num" style="color:var(--heroGood);font-weight:600">+${F.int(s.followersDelta)} este mes</span></div>
+        <div class="small" style="color:var(--heroMuted)">seguidores${fd != null ? ` · <span class="num" style="color:${fd >= 0 ? 'var(--heroGood)' : 'var(--heroAccent)'};font-weight:600">${fd >= 0 ? '+' : '−'}${F.int(Math.abs(fd))} en el período</span>` : s.live ? ' · la variación se calcula desde que se activa el registro diario' : ''}</div>
         <svg viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true" style="width:100%;height:44px;margin-top:0.5em"><polyline points="${folPts}" fill="none" stroke="var(--heroGood)" stroke-width="2.25" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/></svg>
       </div>
     </section>
     <section class="tiles" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr))" aria-label="Métricas clave de social media">${s.tiles.map((t, i) => staticTile(t, i)).join('')}</section>
+    ${s.approxReach ? '<div class="xs muted" style="margin-top:-2em">El alcance de rangos mayores a 30 días es aproximado: Instagram lo entrega por tramos.</div>' : ''}
     <div class="row">${best}</div>
-    <section class="card">${sectionHead('Demografía de la comunidad', '¿Quiénes nos siguen?')}
-      <div class="row">
-        <div style="flex:1 1 320px;min-width:0;display:flex;flex-direction:column;gap:0.6em"><h3 class="h3">Edad</h3>
-          ${s.ages.map(([l, p]) => barRow(l, p + '%', ((p / 38) * 100).toFixed(1) + '%', p === 38 ? 'var(--accent)' : 'var(--prev)', '4em', '3em')).join('')}
-          <div class="grow" style="display:flex;height:28px;gap:3px;border-radius:8px;overflow:hidden;margin-top:0.5em">${s.gender.map(([l, p], i) => `<div style="flex:${p} 1 0;background:${i ? 'var(--c2)' : 'var(--c4)'};color:var(--onAccent);font-size:0.8125em;font-weight:600;display:flex;align-items:center;padding:0 0.75em">${l} ${p}%</div>`).join('')}</div>
-        </div>
-        <div style="flex:1 1 320px;min-width:0;display:flex;flex-direction:column;gap:0.6em"><h3 class="h3">Países</h3>
-          ${s.countries.map(([l, p], i) => barRow(l, p + '%', Math.max(2, (p / 82) * 100).toFixed(1) + '%', i ? 'var(--prev)' : 'var(--accent)', '6.5em', '3em', !i)).join('')}
-        </div>
-        <div class="insight" style="flex:1 1 260px;justify-content:center"><div class="kicker">Hallazgo</div><div style="font-size:1.0625em;font-weight:500;line-height:1.45">La comunidad es joven-adulta y chilena: el tramo 25–34 años es también el que más compra en el sitio. Le hablamos a la persona correcta.</div></div>
-      </div>
-    </section>
+    ${demoCard}
     <section class="card">${sectionHead('Formato × acción', '¿Qué formato generó qué acción?', '<span class="small muted">Promedio por publicación · toca una acción</span>')}
       ${matrix}
-      <div class="insight row" style="gap:1.25em;align-items:center;flex-direction:row">
-        <div style="flex:1 1 320px;min-width:0"><div class="kicker">Para lograr ${s.actions[aIdx][2]}</div><div style="margin-top:0.3em;font-size:1.125em;font-weight:500;line-height:1.45">${s.actionInsights[aIdx]}</div></div>
+      ${s.formats.length ? `<div class="insight row" style="gap:1.25em;align-items:center;flex-direction:row">
+        <div style="flex:1 1 320px;min-width:0"><div class="kicker">Para lograr ${esc(s.actions[aIdx][2])}</div><div style="margin-top:0.3em;font-size:1.125em;font-weight:500;line-height:1.45">${esc(s.actionInsights[aIdx])}</div></div>
         <div style="flex:1 1 300px;min-width:0;display:flex;flex-direction:column;gap:0.45em">${rank}</div>
-      </div>
+      </div>` : ''}
+      ${stNote}
     </section>
-    <section class="card">${sectionHead('Profundiza por formato', D.title, seg('Formato', Object.entries(s.deep).map(([k, v]) => [k, v.label]), 'fmt', state.fmt))}
-      <div class="tiles" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1em">${D.kpis.map(([l, v]) => `<div style="padding:1.25em 1.375em;border-radius:14px;background:var(--surface2)"><div class="small muted">${l}</div><div class="num" style="font-size:1.5em;font-weight:300">${v}</div></div>`).join('')}</div>
-      <div class="row">
-        <div style="flex:1 1 420px;min-width:0;display:flex;flex-direction:column;gap:0.5em"><h3 class="h3">Mejores del período</h3>
-          ${D.top.map(([n, dt, v], i) => `<div style="display:grid;grid-template-columns:2em minmax(0,1fr) auto;gap:0.75em;align-items:center;padding:0.75em 0.5em;border-bottom:1px solid var(--border);font-size:0.875em"><span class="num" style="width:1.75em;height:1.75em;border-radius:8px;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-weight:600">${i + 1}</span><span style="min-width:0"><span class="ellipsis" style="font-weight:500">${n}</span><span class="xs muted">${dt}</span></span><span class="num" style="font-weight:600">${v}</span></div>`).join('')}
-        </div>
-        <div style="flex:1 1 380px;min-width:0;display:flex;flex-direction:column;gap:1em">${ret}<div class="insight"><div class="kicker">Lectura</div><div style="font-weight:500;line-height:1.5">${D.ins}</div></div></div>
-      </div>
-    </section>
-    <section class="card">${sectionHead('Interacciones del contenido', '¿Cómo interactúa la comunidad?')}
-      <div class="row">
-        <div style="flex:1 1 440px;min-width:0;display:flex;flex-direction:column;gap:0.875em">
-          <div class="small" style="font-weight:600">${F.int(totInt)} interacciones</div>
-          <div class="grow" style="display:flex;height:40px;gap:3px;border-radius:10px;overflow:hidden">${s.interactions.map(([, v, c]) => { const p = (v / totInt) * 100; return `<div style="flex:${v} 1 0;background:${c};display:flex;align-items:center;justify-content:center;color:var(--onAccent);font-size:0.8125em;font-weight:600">${p >= 9 ? F.dec(p, 0) + '%' : ''}</div>`; }).join('')}</div>
-          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:0.6em">${s.interactions.map(([l, v, c]) => `<div style="display:flex;gap:0.5em"><span style="width:10px;height:10px;margin-top:0.4em;border-radius:3px;flex:none;background:${c}"></span><span><span class="small muted" style="display:block">${l}</span><span class="num" style="font-weight:600">${F.int(v)} <span class="small muted" style="font-weight:400">${F.dec((v / totInt) * 100, 0)}%</span></span></span></div>`).join('')}</div>
-          <div style="display:flex;align-items:center;gap:1em;padding:1em 1.125em;border-radius:14px;background:var(--surface2)"><div class="num" style="font-size:2em;font-weight:300;color:var(--pos)">33%</div><div class="small">son <strong>interacciones de valor</strong> (comentarios, compartidos y guardados), contra 28% en el período anterior. La comunidad no solo mira: participa.</div></div>
-        </div>
-        <div style="flex:1 1 380px;min-width:0;display:flex;flex-direction:column;gap:0.6em">
-          <div style="display:flex;justify-content:space-between;align-items:baseline;gap:0.5em"><h3 class="h3">¿De qué hablan en los comentarios?</h3><span class="xs muted">Clasificación manual</span></div>
-          ${s.topics.map(([l, p, k]) => barRow(l, p + '%', ((p / 42) * 100).toFixed(1) + '%', k === 'hl' ? 'var(--accent)' : k === 'neg' ? 'var(--neg)' : 'var(--prev)', '11em', '3em')).join('')}
-          <div class="small muted">18% pregunta por tallas: confirma que la guía de tallas responde una necesidad real de la comunidad.</div>
-        </div>
-      </div>
-    </section>
-    <section style="display:flex;flex-direction:column;gap:1.25em">${sectionHead('Conclusiones cualitativas', 'Lo que nos dijo la comunidad')}
-      <div class="tiles" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr))">${s.conclusions.map(([t, d], i) => `<article class="tile rise" style="padding:1.75em;border-radius:24px;gap:0.6em;animation-delay:${0.06 * i}s"><span class="num" style="font-size:2em;font-weight:300;color:var(--accent);line-height:1">0${i + 1}</span><div style="font-weight:500;font-size:1.0625em;line-height:1.4">${t}</div><div class="small muted">${d}</div></article>`).join('')}</div>
-    </section>
-    <section class="hero" style="flex-direction:column;align-items:stretch;gap:1.5em" aria-labelledby="recs">
-      <div class="row" style="justify-content:space-between;align-items:flex-end;gap:1em">
-        <div><div class="kicker">Recomendaciones de contenido</div><h2 id="recs" class="h2" style="font-size:1.85em;font-weight:300">Qué publicar el próximo mes</h2></div>
-        <div style="flex:0 1 380px;min-width:260px;display:flex;flex-direction:column;gap:0.4em"><div class="xs" style="color:var(--heroMuted)">Mix sugerido para el feed · stories todos los días</div>
-          <div style="display:flex;height:30px;gap:3px;border-radius:8px;overflow:hidden">${s.mix.map(([l, p], i) => `<div style="flex:${p} 1 0;background:${['var(--heroAccent)', 'var(--heroGood)', 'var(--heroMuted)'][i]};color:#1F1D19;font-size:0.75em;font-weight:600;display:flex;align-items:center;padding:0 0.6em">${l} ${p}%</div>`).join('')}</div></div>
-      </div>
-      <div class="tiles" style="grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:1em">${s.recos.map(([f, fr, t, d, g]) => `<article style="padding:1.375em;border-radius:18px;background:var(--heroTrack);display:flex;flex-direction:column;gap:0.6em">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5em"><span class="badge" style="background:var(--heroText);color:#1F1D19">${f}</span><span class="xs num" style="color:var(--heroMuted)">${fr}</span></div>
-        <div style="font-size:1.125em;font-weight:500;line-height:1.3">${t}</div><div class="small" style="color:var(--heroMuted)">${d}</div>
-        <div class="small" style="margin-top:auto;padding-top:0.6em;border-top:1px solid var(--heroTrack)"><span style="color:var(--heroMuted)">Objetivo:</span> <strong style="color:var(--heroGood);font-weight:600">${g}</strong></div></article>`).join('')}</div>
-    </section>
+    ${deepCard}
+    ${intCard}
+    ${conclCard}
+    ${recoCard}
   </div>`;
 }
 
@@ -731,9 +894,9 @@ function viewSocial() {
    ============================================================ */
 function view() {
   const r = computeRange(state);
-  const body = state.tab === 'paid' ? viewPaid(r) : state.tab === 'social' ? viewSocial() : viewOwned();
+  const body = state.tab === 'paid' ? viewPaid(r) : state.tab === 'social' ? viewSocial(r) : viewOwned();
   const src = state.tab === 'paid' ? 'Fuente: Meta Ads · Atribución ' + esc(CONFIG.meta?.attributionLabel || 'según configuración de la cuenta')
-    : state.tab === 'social' ? 'Fuente: Instagram (API de Meta) · Datos de ejemplo' : 'Fuente: Google Analytics 4 · Datos de ejemplo';
+    : state.tab === 'social' ? 'Fuente: Instagram (API de Meta)' + (state.social?.source === 'instagram' ? '' : ' · Datos de ejemplo') : 'Fuente: Google Analytics 4 · Datos de ejemplo';
   return `<div class="root ${state.theme === 'dark' ? 'dark' : 'light'} ${state.animate ? 'animate' : ''}" style="font-size:${state.fs}px">
     <div class="wrap">
       ${viewHeader()}
@@ -785,17 +948,44 @@ async function loadPaid() {
   render();
 }
 
+
+/* ============================================================
+   Datos de Instagram
+   ============================================================ */
+const socialCache = new Map();
+let socialReq = 0;
+async function loadSocial() {
+  const r = computeRange(state);
+  const key = [r.since, r.until, r.csince, r.cuntil].join('|');
+  if (socialCache.has(key)) { const c = socialCache.get(key); state.social = c.data; state.socialNote = c.note; render(); return; }
+  const my = ++socialReq;
+  state.socialLoading = true; render();
+  let data = null, note = null;
+  try {
+    const res = await fetch(`/api/instagram?since=${r.since}&until=${r.until}&csince=${r.csince}&cuntil=${r.cuntil}`);
+    const j = await res.json().catch(() => ({ error: 'bad_json', message: 'Respuesta no válida del servidor' }));
+    if (!res.ok || j.error) throw Object.assign(new Error(j.message || 'Error ' + res.status), { kind: j.error });
+    data = j;
+  } catch (e) { note = { kind: e.kind || 'network', message: e.message }; }
+  if (my !== socialReq) return;
+  if (data) socialCache.set(key, { data, note });
+  state.social = data; state.socialNote = note; state.socialLoading = false;
+  if (state.tab === 'social') state.animate = true;
+  render();
+}
+const reloadData = () => { loadPaid(); if (state.tab === 'social' || state.social || state.socialNote) loadSocial(); };
+
 /* ============================================================
    Eventos
    ============================================================ */
 const ACTIONS = {
   theme: (v) => { state.theme = v; LS.set('theme', v); render(); },
   fs: (v) => { state.fs = Number(v); LS.set('fs', state.fs); render(); },
-  tab: (v) => { state.tab = v; state.animate = true; render(); },
-  range: (v) => { state.range = v; loadPaid(); },
-  from: (v) => { state.rFrom = Number(v); state.rTo = Math.min(state.rTo, state.rFrom); state.range = 'custom'; loadPaid(); },
-  to: (v) => { state.rTo = Number(v); state.rFrom = Math.max(state.rFrom, state.rTo); state.range = 'custom'; loadPaid(); },
-  cmp: (v) => { state.cmp = v; loadPaid(); },
+  tab: (v) => { state.tab = v; state.animate = true; render(); if (v === 'social' && !state.social && !state.socialLoading) loadSocial(); },
+  range: (v) => { state.range = v; reloadData(); },
+  from: (v) => { state.rFrom = Number(v); state.rTo = Math.min(state.rTo, state.rFrom); state.range = 'custom'; reloadData(); },
+  to: (v) => { state.rTo = Number(v); state.rFrom = Math.max(state.rFrom, state.rTo); state.range = 'custom'; reloadData(); },
+  cmp: (v) => { state.cmp = v; reloadData(); },
   metric: (v) => { state.metric = v; render(); },
   sort: (v) => { state.sortKey = v; render(); },
   stageF: (v) => { state.stageF = v; render(); },
@@ -832,4 +1022,4 @@ if (typeof document !== 'undefined') {
   })();
 }
 
-export { view, state, computeRange, CONFIG };
+export { view, state, computeRange, CONFIG, render };
