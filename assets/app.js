@@ -136,22 +136,45 @@ const sum = (xs) => xs.reduce((a, b) => a + (Number(b) || 0), 0);
 const avg = (xs) => { const v = xs.filter((x) => x != null && !isNaN(x)); return v.length ? sum(v) / v.length : null; };
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
-function sparkPts(vals, w, h, pad = 3) {
-  const v = vals.map((x) => (x == null || isNaN(x) ? null : Number(x)));
+// Curva suave que pasa por cada punto sin inventar picos (interpolación monótona).
+function curvePath(P) {
+  if (P.length < 2) return '';
+  const f = (n) => n.toFixed(1);
+  if (P.length === 2) return `M${f(P[0][0])},${f(P[0][1])}L${f(P[1][0])},${f(P[1][1])}`;
+  const n = P.length, dx = [], m = [], t = new Array(n);
+  for (let i = 0; i < n - 1; i++) { dx[i] = P[i + 1][0] - P[i][0]; m[i] = dx[i] ? (P[i + 1][1] - P[i][1]) / dx[i] : 0; }
+  t[0] = m[0]; t[n - 1] = m[n - 2];
+  for (let i = 1; i < n - 1; i++) t[i] = m[i - 1] * m[i] <= 0 ? 0 : (3 * (dx[i - 1] + dx[i])) / ((2 * dx[i] + dx[i - 1]) / m[i - 1] + (dx[i] + 2 * dx[i - 1]) / m[i]);
+  let d = `M${f(P[0][0])},${f(P[0][1])}`;
+  for (let i = 0; i < n - 1; i++) {
+    const h3 = dx[i] / 3;
+    d += `C${f(P[i][0] + h3)},${f(P[i][1] + t[i] * h3)} ${f(P[i + 1][0] - h3)},${f(P[i + 1][1] - t[i + 1] * h3)} ${f(P[i + 1][0])},${f(P[i + 1][1])}`;
+  }
+  return d;
+}
+// Promedio móvil centrado: muestra la tendencia en las miniaturas sin el ruido diario.
+function smoothVals(v, win) {
+  if (!win || v.length < win * 3) return v;
+  const k = Math.floor(win / 2);
+  return v.map((x, i) => { if (x == null) return null; const w = v.slice(Math.max(0, i - k), i + k + 1).filter((y) => y != null); return w.reduce((a, b) => a + b, 0) / w.length; });
+}
+function sparkPts(vals, w, h, pad = 3, win = 3) {
+  const v = smoothVals(vals.map((x) => (x == null || isNaN(x) ? null : Number(x))), win);
   const ok = v.filter((x) => x != null);
   if (ok.length < 2) return null;
   let lo = Math.min(...ok), hi = Math.max(...ok);
   const mean = Math.abs(ok.reduce((a, b) => a + b, 0) / ok.length) || 1;
   if ((hi - lo) / mean < 0.02) { lo -= mean; hi += mean; }
   const r = hi - lo || 1;
-  const pts = [];
-  v.forEach((x, i) => { if (x != null) pts.push(`${((i * w) / (v.length - 1)).toFixed(1)},${(h - pad - ((x - lo) / r) * (h - 2 * pad)).toFixed(1)}`); });
-  return { line: pts.join(' '), area: `0,${h} ${pts.join(' ')} ${w},${h}` };
+  const P = [];
+  v.forEach((x, i) => { if (x != null) P.push([(i * w) / (v.length - 1), h - pad - ((x - lo) / r) * (h - 2 * pad)]); });
+  const line = curvePath(P);
+  return { line, area: `${line}L${P[P.length - 1][0].toFixed(1)},${h}L${P[0][0].toFixed(1)},${h}Z` };
 }
-function sparkSvg(vals, { w = 120, h = 34, stroke = 'var(--faint)', fill = 'rgba(127,127,127,0.08)', sw = 1.75, style = '' } = {}) {
-  const p = sparkPts(vals, w, h);
+function sparkSvg(vals, { w = 120, h = 34, stroke = 'var(--faint)', fill = 'rgba(127,127,127,0.08)', sw = 1.75, style = '', win = 3 } = {}) {
+  const p = sparkPts(vals, w, h, 3, win);
   if (!p) return `<svg viewBox="0 0 ${w} ${h}" aria-hidden="true" style="${style}"></svg>`;
-  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true" style="${style}"><polygon points="${p.area}" fill="${fill}"/><polyline points="${p.line}" fill="none" stroke="${stroke}" stroke-width="${sw}" vector-effect="non-scaling-stroke"/></svg>`;
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true" style="${style}"><path d="${p.area}" fill="${fill}"/><path d="${p.line}" fill="none" stroke="${stroke}" stroke-width="${sw}" stroke-linecap="round" vector-effect="non-scaling-stroke"/></svg>`;
 }
 
 const deltaChip = (dl, extra = '') => `<span class="delta num ${dl.cls}">${dl.arrow} ${esc(dl.txt)}${extra}</span>`;
@@ -187,7 +210,7 @@ function heroNum(txt) {
 }
 function hero(span, { label, right, value, sentence, badge, spark }) {
   return `<section class="hero rise" style="grid-column:span ${span}">
-    ${spark ? sparkSvg(spark, { w: 400, h: 160, stroke: 'currentColor', fill: 'rgba(0,0,0,0.06)', sw: 2, style: 'position:absolute;left:0;right:0;bottom:0;width:100%;height:150px;opacity:.55' }) : ''}
+    ${spark ? sparkSvg(spark, { w: 400, h: 160, stroke: 'currentColor', fill: 'rgba(0,0,0,0.06)', sw: 2, win: 5, style: 'position:absolute;left:0;right:0;bottom:0;width:100%;height:150px;opacity:.55' }) : ''}
     <div style="display:flex;justify-content:space-between;gap:12px;position:relative"><span class="mono" style="font-size:11px;letter-spacing:.08em;text-transform:uppercase">${label}</span><span class="mono" style="font-size:11px;text-transform:uppercase">${right || ''}</span></div>
     <div style="position:relative"><div class="num bignum">${heroNum(value)}</div><div class="serif sentence">${sentence || ''}</div></div>
     ${badge ? `<span class="badge num">${badge}</span>` : ''}
@@ -333,7 +356,7 @@ function paidDaily(d, r) {
   const X = (i) => ((i + 0.5) * 1000) / n;
   const bw = Math.max(1.5, (1000 / n) * 0.5);
   const bars = days.map((x, i) => `<rect x="${(X(i) - bw / 2).toFixed(1)}" y="${Y(x.spend).toFixed(1)}" width="${bw.toFixed(1)}" height="${(300 - Y(x.spend)).toFixed(1)}" rx="${Math.min(3, bw / 2).toFixed(1)}" fill="var(--faint)" fill-opacity="0.5"/>`).join('');
-  const rp = days.map((x, i) => `${X(i).toFixed(1)},${Y(x.revenue).toFixed(1)}`).join(' ');
+  const rp = curvePath(days.map((x, i) => [X(i), Y(x.revenue)]));
   const pk = days.reduce((b, x, i) => ((x.revenue || 0) > (days[b].revenue || 0) ? i : b), 0);
   const notes = (CONFIG.paid?.[r.monthKey]?.annotations || []).map(([date, text]) => [days.findIndex((x) => x.date === date), text]).filter(([i]) => i >= 0).slice(0, 3);
   const noteHtml = notes.map(([i, text], k) => {
@@ -349,8 +372,8 @@ function paidDaily(d, r) {
       <div style="flex:1 1 560px;min-width:0;position:relative" id="paid-chart">
         <svg viewBox="0 0 1000 320" preserveAspectRatio="none" role="img" aria-label="Inversión e ingresos por día" style="width:100%;height:320px;display:block">
           <line x1="0" y1="20" x2="1000" y2="20" stroke="var(--grid)"/><line x1="0" y1="113" x2="1000" y2="113" stroke="var(--grid)"/><line x1="0" y1="206" x2="1000" y2="206" stroke="var(--grid)"/><line x1="0" y1="300" x2="1000" y2="300" stroke="var(--border)"/>
-          ${bars}<polygon points="${X(0).toFixed(1)},300 ${rp} ${X(n - 1).toFixed(1)},300" fill="var(--accentSoft)"/>
-          <polyline points="${rp}" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+          ${bars}<path d="${rp}L${X(n - 1).toFixed(1)},300L${X(0).toFixed(1)},300Z" fill="var(--accentSoft)"/>
+          <path d="${rp}" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
           ${noteLines}<line id="paid-cursor" x1="-10" y1="20" x2="-10" y2="300" stroke="var(--accent)" stroke-opacity="0.5" vector-effect="non-scaling-stroke"/>
           <g id="paid-hit">${hits}</g>
         </svg>
